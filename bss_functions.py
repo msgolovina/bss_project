@@ -1,12 +1,14 @@
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-
+from matplotlib import dates as mdates
 import branca
 import folium
 import urllib
 import json
 import re
+import datetime
+
 
 from sklearn.cluster import KMeans
 from sklearn.preprocessing import OneHotEncoder, LabelEncoder
@@ -137,7 +139,7 @@ def plot_SSE(weekdays_norm, weekends_norm):
 
     sses = []
     for k in range(1, 11):
-        kmeans = KMeans(n_clusters=k, random_state=0).fit(weekdays_norm.T)
+        kmeans = KMeans(n_clusters=k, random_state=7).fit(weekdays_norm.T)
         clusters = kmeans.predict(weekdays_norm.T)
         sse = sum([sum(pow(weekdays_norm.T.iloc[i, :] - kmeans.cluster_centers_[clusters[i]], 2)) for i in
                    range(weekdays_norm.T.shape[0])])
@@ -213,7 +215,7 @@ def plot_cluster_usage_patterns(weekdays_norm, weekends_norm, cluster_colours_wd
     axis_weekends.set_title('Clusters of bike usage patterns at weekends')
     axis_weekends.margins(0.02)
     axis_weekends.legend(
-        labels=['balanced', 'full at lunch time', 'empty at lunch time'])
+        labels=['balanced', 'empty at lunch time', 'full at lunch time'])
     axis_weekends.axvline(x=144, color = 'r', alpha = 0.2)
     clusters_weekends = model_fit.predict(weekends_norm.T)
 
@@ -279,3 +281,79 @@ def get_seasonal_features(features):
         features[name] = onehotfeat.astype(int)
     features.drop(['Season'], 1, inplace=True)
     return features
+
+
+def plot_usage_examples(data, station_1, station_2):
+    df_copy = data.copy()
+    df_copy['weekday'] = df_copy.index.weekday
+    weekdays = df_copy.loc[df_copy['weekday'] < 5].drop(['weekday'], 1)
+    weekends = df_copy.loc[df_copy['weekday'] >= 5].drop(['weekday'], 1)
+
+    # Group by minute of day and take average for each station
+    weekdays['time'] = weekdays.index.to_series().apply(lambda x: datetime.datetime.strftime(x, '%H:%M'))
+    weekdays = weekdays.groupby('time').agg('mean').astype(int)
+    weekends['time'] = weekends.index.to_series().apply(lambda x: datetime.datetime.strftime(x, '%H:%M'))
+    weekends = weekends.groupby('time').agg('mean').astype(int)
+
+    # Normalise each station between 0 and 1 as each station has different capacity
+    weekdays_norm = weekdays / weekdays.max()
+    weekends_norm = weekends / weekends.max()
+
+    weekends_norm.index = pd.to_datetime(weekends.index)
+    weekdays_norm.index = pd.to_datetime(weekdays.index)
+
+    wd_1 = weekdays_norm.resample('1T')[station_1].mean().interpolate()
+    we_1 = weekends_norm.resample('1T')[station_1].mean().interpolate()
+    wd_2 = weekdays_norm.resample('1T')[station_2].mean().interpolate()
+    we_2 = weekends_norm.resample('1T')[station_2].mean().interpolate()
+
+    figure, (ax, ax1) = plt.subplots(1, 2, figsize=(20, 6))
+    ax.plot(wd_1)
+    ax.plot(we_1)
+    ax.set_title('{} station availability'.format(station_1.capitalize().replace('_', ' ')))
+    ax.set_ylabel('# of bikes (out of 30)')
+    ax.set_xlabel('hour of the day')
+    ax.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M'))
+    ax.legend(['weekdays', 'weekends'])
+
+    ax1.plot(wd_2)
+    ax1.plot(we_2)
+    ax1.set_title('{} station availability'.format(station_2.capitalize().replace('_', ' ')))
+    ax1.set_ylabel('# of bikes (out of 30)')
+    ax1.set_xlabel('hour of the day')
+    ax1.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M'))
+    ax1.legend(['weekdays', 'weekends'])
+    plt.tight_layout()
+
+def plot_stations_with_overdemand(data, stations):
+    data['DATE'] = [x.date() for x in data.index]
+    data.columns = [x.replace("'", '') for x in data.columns.values]
+    dates = []
+    station_was_empty_3by2mins = []
+    station_was_full_3by2mins = []
+    for day in data.DATE.unique():
+        dates.append(day)
+        df_day = data[data.DATE == day]
+        counter_stations_full = 0
+        counter_stations_empty = 0
+        for name, capacity in zip(stations.Name, stations.Capacity):
+            if df_day[name.replace(' ', '_')][df_day[name.replace(' ', '_')] == capacity].shape[0] > 45:
+                counter_stations_full += 1
+            if df_day[name.replace(' ', '_')][df_day[name.replace(' ', '_')] == 0].shape[0] > 45:
+                counter_stations_empty += 1
+        station_was_full_3by2mins.append(counter_stations_full)
+        station_was_empty_3by2mins.append(counter_stations_empty)
+
+    dff = pd.DataFrame({'full': station_was_full_3by2mins, 'empty': station_was_empty_3by2mins})
+    dff.index = pd.DatetimeIndex(dates)
+    dff = dff.sort_index(ascending=True)
+    dff['weekday'] = [x.weekday() for x in dff.index]
+    dff = dff.resample('7D').mean().bfill()
+    #fig = plt.figure(figsize=(12, 6))
+    plt.plot(dff['full'])
+    plt.plot(dff['empty'])
+    plt.legend(labels=['full for 1.5+ hrs', 'empty for 1.5+ hrs'])
+    plt.xlabel('Month')
+    plt.ylabel('Number of stations')
+    #fig.savefig('empty_full.png');
+    plt.show()
