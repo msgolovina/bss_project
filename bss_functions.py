@@ -15,25 +15,32 @@ API_KEY_GOOGLE = "AIzaSyDl8r2Vup0mrmphy8AtRD8IqV-TgOslb4A"
 
 
 
-def describe_data(dataset, data_name, n_observations):
+def describe_data(dataset, data_name, n_observations, n_dropped):
 
-    print('''Collected {} for:
+    '''
+    describe the data; all the days with more than 20 missing
+    observations are not included in the final dataset
+    '''
+
+    print('''
+    Collected {} for:
               \u2022 {} days without missing observations;
-              \u2022 {} days with 1 to 10 missing values;
-              \u2022 {} days with more than 10 missing values.
+              \u2022 {} days with 1 to 20 missing values.
+    {} days with more than 20 missing values were dropped.
 
     The data covers the period from {:%d %B %Y %H:%M} to {:%d %B %Y %H:%M}'''.format(
         data_name,
         pd.value_counts(n_observations)[720],
-        pd.value_counts(n_observations[(n_observations >= 710) & (n_observations < 720)]).sum(),
-        pd.value_counts(n_observations[n_observations < 710]).sum(),
+        pd.value_counts(n_observations[(n_observations >= 700) & (n_observations < 720)]).sum(),
+        n_dropped,
         dataset.index.min().date(),
         dataset.index.max().date()))
 
 def altitude(latitude, longitude):
     '''
-    this function takes points indicating station locations and
-    requests elevation of these points from Google Maps API Elevation Service
+    this function takes points indicating station locations and requests
+    elevation of these points from Google Maps API Elevation Service;
+    Google API key is AIzaSyDl8r2Vup0mrmphy8AtRD8IqV-TgOslb4A
     '''
 
     key = API_KEY_GOOGLE
@@ -52,6 +59,12 @@ def altitude(latitude, longitude):
 
 
 def plot_elevation_map(stations, lat, lon, station, altitude):
+
+    '''
+    plot interactive folium map of bicycle stations in Dublin;
+    the colour of the station marker depends on the elevation of the station above sea level
+    '''
+
     cm = branca.colormap.LinearColormap(['black', 'deepskyblue'], vmin = np.min(stations['Alt']), vmax = np.max(stations['Alt']))
 
     station_markers = folium.map.FeatureGroup()
@@ -76,6 +89,13 @@ def plot_elevation_map(stations, lat, lon, station, altitude):
     return folium_map
 
 def plot_clusters_map(stations, data, clusters_array, cluster_colours):
+
+    '''
+    plot interactive folium map of bicycle stations in Dublin;
+    the colour of the station marker denotes the cluster of this station
+    based on its usage pattern
+    '''
+
     try:
         stations.drop(['Cluster'], 1, inplace=True)
     except:
@@ -106,6 +126,12 @@ def plot_clusters_map(stations, data, clusters_array, cluster_colours):
 
 
 def plot_SSE(weekdays_norm, weekends_norm):
+
+    '''
+    plot within cluster sum of squared errors for clusterization of
+    bicycle usage on weekdays and weekends;
+    the appropriate number of clusters can be chosen using the elbow method
+    '''
 
     figure, (axis_weekdays, axis_weekends) = plt.subplots(1, 2, figsize=(20, 6))
 
@@ -141,6 +167,14 @@ def plot_SSE(weekdays_norm, weekends_norm):
 
 
 def plot_cluster_usage_patterns(weekdays_norm, weekends_norm, cluster_colours_wd, cluster_colours_we):
+
+    '''
+    plot average station availability for each of the clusters
+    on weekdays and weekends; vertical red line marks 12:00 on both
+    graphs to make it more clear how the most busy hour is different
+    for weekdays and weekends
+    '''
+
     figure, (axis_weekdays, axis_weekends) = plt.subplots(1, 2, figsize=(20, 6))
 
     # weekdays
@@ -187,6 +221,13 @@ def plot_cluster_usage_patterns(weekdays_norm, weekends_norm, cluster_colours_wd
 
 
 def get_weather_features(weather):
+
+    '''
+    transform weather dataset to create new numerical features from
+    text description of the weather; first, dummy features for snow, rain, clouds,
+    fog, thinder and hail are created. second, adjectives describing intensity
+    (light, heavy) are used to add more levels to these features.
+    '''
     idx = weather.index
     weather_types = pd.DataFrame(weather.Weather.value_counts()).reset_index()
     weather_types['agg_types'] = weather_types['index'].copy().apply(lambda x: re.sub('Windy|/', '', x).strip())
@@ -213,6 +254,11 @@ def get_weather_features(weather):
     return weather
 
 def get_seasonal_features(features):
+
+    '''
+    add features denoting the month and the season of each observation
+    '''
+
     features['Month'] = [x.month for x in features.index]
 
     season = []
