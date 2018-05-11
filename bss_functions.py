@@ -194,7 +194,7 @@ def plot_cluster_usage_patterns(weekdays_norm, weekends_norm, cluster_colours_wd
     axis_weekdays.set_ylabel('% of the station full')
     axis_weekdays.set_title('Clusters of bike usage patterns at weekdays')
     axis_weekdays.margins(0.02)
-    axis_weekdays.legend(labels=['balanced', 'empty at working time', 'full at working time'])
+    axis_weekdays.legend(labels=['empty at working time', 'full at working time', 'balanced'])
     axis_weekdays.axvline(x = 144, color = 'r', alpha = 0.2)
     clusters_weekdays = model_fit.predict(weekdays_norm.T)
 
