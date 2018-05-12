@@ -349,11 +349,58 @@ def plot_stations_with_overdemand(data, stations):
     dff = dff.sort_index(ascending=True)
     dff['weekday'] = [x.weekday() for x in dff.index]
     dff = dff.resample('7D').mean().bfill()
-    #fig = plt.figure(figsize=(12, 6))
     plt.plot(dff['full'])
     plt.plot(dff['empty'])
     plt.legend(labels=['full for 1.5+ hrs', 'empty for 1.5+ hrs'])
     plt.xlabel('Month')
     plt.ylabel('Number of stations')
-    #fig.savefig('empty_full.png');
     plt.show()
+
+
+
+def estimate_adjusted_rate(data, station, step_size):
+    pb_weekdays = data
+    diff = pb_weekdays[station].diff()
+    diff[diff.isnull()] = 0
+    pb_weekdays['difference'] = diff
+    pb_weekdays['peak'] = pb_weekdays['upward_peak'].replace(2, 1) + pb_weekdays['downward_peak'].replace(2, 1)
+    pb_weekdays['difference'] = [x if y == 0 else 0 for x, y in zip(pb_weekdays.difference, pb_weekdays.peak)]
+    pb_weekdays['maxval'] = [2 if x == 30 else 0 for x in pb_weekdays[station]]
+    pb_weekdays['minval'] = [2 if x == 0 else 0 for x in pb_weekdays[station]]
+    pb_weekdays['sum_diffs_arr'] = [x if x > 0 else 0 for x in pb_weekdays.difference]
+    pb_weekdays['sum_diffs_dep'] = [x if x < 0 else 0 for x in pb_weekdays.difference]
+    pb_weekdays['valid_arr_time'] = [2 if y == 0 else 0 for y in pb_weekdays.maxval]
+    pb_weekdays['valid_dep_time'] = [2 if y == 0 else 0 for y in pb_weekdays.minval]
+
+    pb_weekdays = pd.DataFrame(pb_weekdays.resample(str(step_size)+'T').sum())
+    pb_weekdays['time'] = pb_weekdays.index.to_series().apply(lambda x: datetime.datetime.strftime(x, '%H:%M'))
+    pb_weekdays['arr_rate'] = pb_weekdays.sum_diffs_arr / (pb_weekdays.valid_arr_time / 60)
+    pb_weekdays['dep_rate'] = pb_weekdays.sum_diffs_dep / (pb_weekdays.valid_dep_time / 60)
+    pb_weekdays[pb_weekdays['arr_rate'].isnull()] = 0
+    pb_weekdays[pb_weekdays['arr_rate'] == np.inf] = 0
+    pb_weekdays[pb_weekdays['dep_rate'].isnull()] = 0
+    pb_weekdays[pb_weekdays['dep_rate'] == np.inf] = 0
+    pb_weekdays[pb_weekdays['arr_rate'] == -np.inf] = 0
+    pb_weekdays[pb_weekdays['dep_rate'] == -np.inf] = 0
+    diff_arr_12 = pb_weekdays.groupby('time').agg('mean')['arr_rate'][1:]
+    diff_dep_12 = -pb_weekdays.groupby('time').agg('mean')['dep_rate'][1:]
+
+    diff = data[(data.upward_peak == 0) & (data.downward_peak == 0)][station].diff()
+    diff[diff.isnull()] = 0
+    diff_arr_1 = pd.DataFrame(diff[diff >= 0].resample(str(step_size)+'T').sum()) * 60/step_size
+    diff_dep_1 = pd.DataFrame(diff[diff <= 0].resample(str(step_size)+'T').sum()) * 60/step_size
+    diff_dep_1 = pd.DataFrame(diff[diff <= 0].resample(str(step_size)+'T').sum()) * 60/step_size
+    diff_arr_1['time'] = diff_arr_1.index.to_series().apply(lambda x: datetime.datetime.strftime(x, '%H:%M'))
+    diff_arr_1 = diff_arr_1.groupby('time').agg('mean')
+    diff_dep_1['time'] = diff_dep_1.index.to_series().apply(lambda x: datetime.datetime.strftime(x, '%H:%M'))
+    diff_dep_1 = -diff_dep_1.groupby('time').agg('mean')
+    figure, (ax1, ax2) = plt.subplots(1, 2, figsize = (12, 6))
+    ax1.set_ylabel('rate (events per hour)')
+    ax1.set_title('Arrival rate. Interval: {} min'.format(step_size))
+    diff_arr_1[station].plot(alpha=0.7, ax = ax1)
+    diff_arr_12.plot(alpha=0.7, ax = ax1)
+    ax2.set_title('Departure rate. Interval: {} min'.format(step_size))
+    ax2.set_ylabel('rate (events per hour)')
+    diff_dep_1[station].plot(alpha=0.7, ax=ax2)
+    diff_dep_12.plot(alpha=0.7, ax=ax2)
+    return diff_arr_1, diff_arr_12, diff_dep_1, diff_dep_12
