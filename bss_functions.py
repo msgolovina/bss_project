@@ -403,3 +403,13 @@ def estimate_adjusted_rate(data, station, step_size):
     diff_dep_1[station].plot(alpha=0.7, color = 'indianred', ax=ax2)
     diff_dep_12.plot(alpha=0.7, color = 'dodgerblue', ax=ax2)
     return diff_arr_1, diff_arr_12, diff_dep_1, diff_dep_12
+
+# Algorihtm to detect upward peaks
+# For each day in days:
+#     select observations from this day
+#     calculate first differences
+#     calculate rolling_mean of first differences, window = 3
+#     select indices of rolling mean values such that rolling_mean[index] >= 7 or difference[index] >= 7 for index in indices
+#     for index in indices:
+#         counter = 0
+#         add neighbouring indices to the left and to the right of the index one by one while
