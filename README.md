@@ -5,4 +5,3 @@
 * [working_file.ipynb](https://github.com/msgolovina/bss_project/blob/master/working_file.ipynb) - jupyter notebook with graphs and calculations
 * [bss_functions.py](https://github.com/msgolovina/bss_project/blob/master/bss_functions.py) - custom helper functions for working_file
 * [data](https://github.com/msgolovina/bss_project/tree/master/data) 
-* [Leaflet map of dublinbikes stations](http://htmlpreview.github.com/?https://github.com/msgolovina/bss_project/blob/master/weekdays_map.html)
