@@ -413,3 +413,12 @@ def estimate_adjusted_rate(data, station, step_size):
 #     for index in indices:
 #         counter = 0
 #         add neighbouring indices to the left and to the right of the index one by one while
+
+
+rates = arrival_rate.values
+        arrival_times = []
+        for hour in range(len(rates)):
+            n_arrivals = np.random.poisson(lam=rates[hour%len(rates)]*24/len(rates))
+            for x in range(n_arrivals):
+                arrival_times = np.append(arrival_times, np.random.uniform() + hour)
+        arrival_times = sorted(arrival_times)
