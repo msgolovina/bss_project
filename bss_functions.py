@@ -12,6 +12,7 @@ import datetime
 
 from sklearn.cluster import KMeans
 from sklearn.preprocessing import OneHotEncoder, LabelEncoder
+from sklearn.metrics import mean_squared_error
 
 API_KEY_GOOGLE = "AIzaSyDl8r2Vup0mrmphy8AtRD8IqV-TgOslb4A"
 
@@ -388,7 +389,6 @@ def estimate_adjusted_rate(data, station, step_size):
     diff[diff.isnull()] = 0
     diff_arr_1 = pd.DataFrame(diff[diff >= 0].resample(str(step_size)+'T').sum()) * 60/step_size
     diff_dep_1 = pd.DataFrame(diff[diff <= 0].resample(str(step_size)+'T').sum()) * 60/step_size
-    diff_dep_1 = pd.DataFrame(diff[diff <= 0].resample(str(step_size)+'T').sum()) * 60/step_size
     diff_arr_1['time'] = diff_arr_1.index.to_series().apply(lambda x: datetime.datetime.strftime(x, '%H:%M'))
     diff_arr_1 = diff_arr_1.groupby('time').agg('mean')
     diff_dep_1['time'] = diff_dep_1.index.to_series().apply(lambda x: datetime.datetime.strftime(x, '%H:%M'))
@@ -404,21 +404,196 @@ def estimate_adjusted_rate(data, station, step_size):
     diff_dep_12.plot(alpha=0.7, color = 'dodgerblue', ax=ax2)
     return diff_arr_1, diff_arr_12, diff_dep_1, diff_dep_12
 
-# Algorihtm to detect upward peaks
-# For each day in days:
-#     select observations from this day
-#     calculate first differences
-#     calculate rolling_mean of first differences, window = 3
-#     select indices of rolling mean values such that rolling_mean[index] >= 7 or difference[index] >= 7 for index in indices
-#     for index in indices:
-#         counter = 0
-#         add neighbouring indices to the left and to the right of the index one by one while
 
 
-rates = arrival_rate.values
+def repeat_simulation_est(estimate_adjusted_rate_sim, sim_station, ar_adj, dep_adj, n_months):
+    d_true = []
+    d_pred = []
+
+    for i in range(n_months):
+        realizations, inds, realizations_finite = sim_station(ar_adj, dep_adj, days_=25, silent = True)
+        inds = [x for subset in inds for x in subset]
+        realizations = [x for subset in realizations for x in subset]
+        realizations = pd.Series(realizations)
+        realizations.index = inds
+        inds_finite = inds  # [x for subset in inds for x in subset]
+        realizations_finite = [x for subset in realizations_finite for x in subset]
+        realizations_finite = pd.Series(realizations_finite)
+        realizations_finite.index = inds_finite
+        realizations_finite_data = pd.DataFrame(realizations_finite)
+        realizations_finite_data.columns = ['occ']
+        arr_adj_hat, dep_adj_hat, _, _ = estimate_adjusted_rate_sim(realizations_finite_data, 15, silent=True)
+        days = np.unique(realizations_finite.index.date)
+        d_, pred_ = calc_some_true_and_preds(days, realizations_finite, estimate_adjusted_rate_sim, realizations_finite_data, realizations)
+        d_true.append(d_)
+        d_pred.append(pred_)
+
+    d_pred = [x for subset in d_pred for x in subset]
+    d_true = [x for subset in d_true for x in subset]
+    print('Successfully calculated RMSE for {} days:'.format(n_months*29), np.sqrt(mean_squared_error(y_true=d_true, y_pred=d_pred)))
+    #print('RMSE for 2 hrs horizon:' ,np.sqrt(mean_squared_error(y_true=d_true, y_pred=d_pred)), np.sqrt(mean_squared_error(y_true=hor_true_, y_pred=hor_pred_)))
+    return np.sqrt(mean_squared_error(y_true=d_true, y_pred=d_pred)), d_true, d_pred#, np.sqrt(mean_squared_error(y_true=hor_true_, y_pred=hor_pred_))
+
+def calc_some_true_and_preds(days, realizations_finite, estimate_adjusted_rate_sim, realizations_finite_data, realizations):
+    k = 2
+    for d in days:
+        day = realizations_finite[realizations_finite.index.date == d]
+        arr_adj_hat, dep_adj_hat, _, _ = estimate_adjusted_rate_sim(realizations_finite_data, 15, silent=True)
+
+        arr_adj_hat.index = [datetime.datetime.strptime(x, '%H:%M') for x in arr_adj_hat.index]
+        dep_adj_hat.index = [datetime.datetime.strptime(x, '%H:%M') for x in dep_adj_hat.index]
+        arr_rate = arr_adj_hat[
+            arr_adj_hat.index.time >= day.index[np.min(np.where(realizations_finite == 0))].time()]
+        dep_rate = dep_adj_hat[
+            dep_adj_hat.index.time >= day.index[np.min(np.where(realizations_finite == 0))].time()]
         arrival_times = []
-        for hour in range(len(rates)):
-            n_arrivals = np.random.poisson(lam=rates[hour%len(rates)]*24/len(rates))
+        for hour in range(len(arr_rate)):
+            n_arrivals = np.random.poisson(lam=arr_rate[hour % len(arr_rate)] * 24 / len(
+                arr_rate))  # * np.max([1+np.random.normal(0, 0.5), 0.0001]))
             for x in range(n_arrivals):
                 arrival_times = np.append(arrival_times, np.random.uniform() + hour)
         arrival_times = sorted(arrival_times)
+        departure_times = []
+        for hour in range(len(dep_rate)):
+            n_departures = np.random.poisson(lam=dep_rate[hour % len(dep_rate)] * 24 / len(
+                dep_rate))  # * np.max([1+np.random.normal(0, 0.5), 0.0001]))
+            for x in range(n_departures):
+                departure_times = np.append(departure_times, np.random.uniform() + hour)
+
+        departure_times = sorted(departure_times)
+        arr = pd.DataFrame(arrival_times)
+        arr['arr'] = np.ones(len(arrival_times))
+        dep = pd.DataFrame(departure_times)
+        dep['arr'] = [-x for x in np.ones(len(departure_times))]
+        arr = arr.append(dep).sort_values(by=0)
+
+        start = 0
+        occupancy = start + np.cumsum(arr['arr'])
+        arr['occupancy'] = occupancy
+        arr = arr.reset_index(drop=True)
+
+        result = ['{0:02.0f}:{1:02.0f}'.format(*divmod(x * 60, 60)) for x in arr[0] / len(arr_adj_hat) * 24]
+        for j, x in enumerate(result):
+            if '60' in x:
+                result[j] = x.replace('60', '59')
+            if '24:' in x:
+                result[j] = ('23:59')
+
+        result = [datetime.datetime.strptime(x, '%H:%M') for x in result]
+        result = [x + datetime.timedelta(hours=day.index[np.min(np.where(realizations_finite == 0))].hour, #-1
+                                         minutes=day.index[np.min(np.where(realizations_finite == 0))].minute) for x
+                  in result]
+
+        arr.index = [datetime.datetime.strftime(x, '%H:%M') for x in result]
+        arr.index = pd.to_datetime(arr.index)
+        arr1 = arr['occupancy'].resample('2T').mean().bfill()
+
+        arr1 = arr1.apply(lambda x: round(x, 0))
+        arr1.index = arr1.index.map(lambda t: t.replace(year=2007, month=6, day=k))
+        k += 1
+        true_demand = realizations[(realizations.index.date == d) & (realizations.index.time >= arr1.index.time[0])]
+        #horizon_2_true = realizations[(realizations.index.date == d) & (realizations.index.time == arr1.index.time[0])+datetime.timedelta(hours=2)]
+        #horizon_pred =  arr1.index.time[0]+datetime.timedelta(hours=2)
+        idx_ = true_demand.index
+        predicted_demand = [x for x, y in zip(arr1, arr1.index) if y in true_demand.index]
+        idx = [y for x, y in zip(arr1, arr1.index) if y in true_demand.index]
+        predicted_demand = pd.Series(predicted_demand)
+        predicted_demand.index = idx
+        true_demand = [x for x, y in zip(true_demand, true_demand.index) if y in predicted_demand.index]
+        true_demand = pd.Series(true_demand)
+        return true_demand, predicted_demand#, horizon_2_true, horizon_pred
+
+
+
+def calc_some_true_and_preds_1H(days, realizations_finite, estimate_adjusted_rate_sim, realizations_finite_data, realizations):
+    k = 2
+    for d in days:
+        day = realizations_finite[realizations_finite.index.date == d]
+        arr_adj_hat, dep_adj_hat, _, _ = estimate_adjusted_rate_sim(realizations_finite_data, 15, silent=True)
+
+        arr_adj_hat.index = [datetime.datetime.strptime(x, '%H:%M') for x in arr_adj_hat.index]
+        dep_adj_hat.index = [datetime.datetime.strptime(x, '%H:%M') for x in dep_adj_hat.index]
+        arr_rate = arr_adj_hat[
+            arr_adj_hat.index.time >= day.index[np.min(np.where(realizations_finite == 0))-datetime.timedelta(hours=1)].time()]
+        dep_rate = dep_adj_hat[
+            dep_adj_hat.index.time >= day.index[np.min(np.where(realizations_finite == 0))-datetime.timedelta(hours=1)].time()]
+        arrival_times = []
+        for hour in range(len(arr_rate)):
+            n_arrivals = np.random.poisson(lam=arr_rate[hour % len(arr_rate)] * 24 / len(
+                arr_rate))  # * np.max([1+np.random.normal(0, 0.5), 0.0001]))
+            for x in range(n_arrivals):
+                arrival_times = np.append(arrival_times, np.random.uniform() + hour)
+        arrival_times = sorted(arrival_times)
+        departure_times = []
+        for hour in range(len(dep_rate)):
+            n_departures = np.random.poisson(lam=dep_rate[hour % len(dep_rate)] * 24 / len(
+                dep_rate))  # * np.max([1+np.random.normal(0, 0.5), 0.0001]))
+            for x in range(n_departures):
+                departure_times = np.append(departure_times, np.random.uniform() + hour)
+
+        departure_times = sorted(departure_times)
+        arr = pd.DataFrame(arrival_times)
+        arr['arr'] = np.ones(len(arrival_times))
+        dep = pd.DataFrame(departure_times)
+        dep['arr'] = [-x for x in np.ones(len(departure_times))]
+        arr = arr.append(dep).sort_values(by=0)
+
+        start = 0
+        occupancy = start + np.cumsum(arr['arr'])
+        arr['occupancy'] = occupancy
+        arr = arr.reset_index(drop=True)
+
+        result = ['{0:02.0f}:{1:02.0f}'.format(*divmod(x * 60, 60)) for x in arr[0] / len(arr_adj_hat) * 24]
+        for j, x in enumerate(result):
+            if '60' in x:
+                result[j] = x.replace('60', '59')
+            if '24:' in x:
+                result[j] = ('23:59')
+
+        result = [datetime.datetime.strptime(x, '%H:%M') for x in result]
+        result = [x + datetime.timedelta(hours=day.index[np.min(np.where(realizations_finite == 0))].hour, #-1
+                                         minutes=day.index[np.min(np.where(realizations_finite == 0))].minute) for x
+                  in result]
+
+        arr.index = [datetime.datetime.strftime(x, '%H:%M') for x in result]
+        arr.index = pd.to_datetime(arr.index)
+        arr1 = arr['occupancy'].resample('2T').mean().bfill()
+
+        arr1 = arr1.apply(lambda x: round(x, 0))
+        arr1.index = arr1.index.map(lambda t: t.replace(year=2007, month=6, day=k))
+        k += 1
+        true_demand = realizations[(realizations.index.date == d) & (realizations.index.time >= arr1.index.time[0])]
+        idx_ = true_demand.index
+        predicted_demand = [x for x, y in zip(arr1, arr1.index) if y in true_demand.index]
+        idx = [y for x, y in zip(arr1, arr1.index) if y in true_demand.index]
+        predicted_demand = pd.Series(predicted_demand)
+        predicted_demand.index = idx
+        true_demand = [x for x, y in zip(true_demand, true_demand.index) if y in predicted_demand.index]
+        true_demand = pd.Series(true_demand)
+        return true_demand, predicted_demand
+
+
+def repeat_simulation_est_1H(estimate_adjusted_rate_sim, sim_station, ar_adj, dep_adj, n_months):
+    d_true = []
+    d_pred = []
+    for i in range(n_months):
+        realizations, inds, realizations_finite = sim_station(ar_adj, dep_adj, days_=25, silent = True)
+        inds = [x for subset in inds for x in subset]
+        realizations = [x for subset in realizations for x in subset]
+        realizations = pd.Series(realizations)
+        realizations.index = inds
+        inds_finite = inds  # [x for subset in inds for x in subset]
+        realizations_finite = [x for subset in realizations_finite for x in subset]
+        realizations_finite = pd.Series(realizations_finite)
+        realizations_finite.index = inds_finite
+        realizations_finite_data = pd.DataFrame(realizations_finite)
+        realizations_finite_data.columns = ['occ']
+        arr_adj_hat, dep_adj_hat, _, _ = estimate_adjusted_rate_sim(realizations_finite_data, 15, silent=True)
+        days = np.unique(realizations_finite.index.date)
+        d_, pred_ = calc_some_true_and_preds_1H(days, realizations_finite, estimate_adjusted_rate_sim, realizations_finite_data, realizations)
+        d_true.append(d_)
+        d_pred.append(pred_)
+    d_pred = [x for subset in d_pred for x in subset]
+    d_true = [x for subset in d_true for x in subset]
+    print('Successfully calculated RMSE for {} days:'.format(n_months*29), np.sqrt(mean_squared_error(y_true=d_true, y_pred=d_pred)))
+    return np.sqrt(mean_squared_error(y_true=d_true, y_pred=d_pred))
