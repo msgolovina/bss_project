@@ -14,7 +14,7 @@ from sklearn.cluster import KMeans
 from sklearn.preprocessing import OneHotEncoder, LabelEncoder
 from sklearn.metrics import mean_squared_error
 
-API_KEY_GOOGLE = "AIzaSyDl8r2Vup0mrmphy8AtRD8IqV-TgOslb4A"
+API_KEY_GOOGLE = "INSERT GOOGLE API HERE"
 
 
 
