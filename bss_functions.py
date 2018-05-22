@@ -396,12 +396,12 @@ def estimate_adjusted_rate(data, station, step_size):
     figure, (ax1, ax2) = plt.subplots(1, 2, figsize = (12, 6))
     ax1.set_ylabel('rate (events per hour)')
     ax1.set_title('Arrival rate. Interval: {} min'.format(step_size))
-    diff_arr_1[station].plot(alpha=0.7, color = 'indianred', ax = ax1)
-    diff_arr_12.plot(alpha=0.7, color = 'dodgerblue', ax = ax1)
+    diff_arr_1[station].plot(drawstyle="steps", alpha=0.7, color = 'indianred', ax = ax1)
+    diff_arr_12.plot(drawstyle="steps", alpha=0.7, color = 'dodgerblue', ax = ax1)
     ax2.set_title('Departure rate. Interval: {} min'.format(step_size))
     ax2.set_ylabel('rate (events per hour)')
-    diff_dep_1[station].plot(alpha=0.7, color = 'indianred', ax=ax2)
-    diff_dep_12.plot(alpha=0.7, color = 'dodgerblue', ax=ax2)
+    diff_dep_1[station].plot(drawstyle="steps", alpha=0.7, color = 'indianred', ax=ax2)
+    diff_dep_12.plot(drawstyle="steps", alpha=0.7, color = 'dodgerblue', ax=ax2)
     return diff_arr_1, diff_arr_12, diff_dep_1, diff_dep_12
 
 
